@@ -25,7 +25,7 @@ from astrbot.core.platform.astr_message_event import AstrMessageEvent
     "shskjw",
     "通过第三方api进行手办化等功能",
     "1.3.1",  # Incremented version for the fix
-    "https://github.com/shkjw/astrbot_plugin_shoubanhua",
+    "https://github.com/cmyyx/astrbot_plugin_shoubanhua_customize",
 )
 class FigurineProPlugin(Star):
     class ImageWorkflow:
@@ -500,7 +500,8 @@ class FigurineProPlugin(Star):
         for image_bytes in image_bytes_list:
             img_b64 = base64.b64encode(image_bytes).decode("utf-8")
             content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}})
-        payload = {"model": "nano-banana", "max_tokens": 1500, "stream": False, "messages": [{"role": "user", "content": content}]}
+        model_name = self.conf.get("api_model", "nano-banana")
+        payload = {"model": model_name, "max_tokens": 1500, "stream": False, "messages": [{"role": "user", "content": content}]}
         try:
             if not self.iwf: return "ImageWorkflow 未初始化"
             async with self.iwf.session.post(api_url, json=payload, headers=headers, proxy=self.iwf.proxy, timeout=120) as resp:
