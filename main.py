@@ -473,10 +473,24 @@ class FigurineProPlugin(Star):
             return key
 
     def _extract_image_url_from_response(self, data: Dict[str, Any]) -> str | None:
+        # 1. 尝试标准格式: message.images
         try: return data["choices"][0]["message"]["images"][0]["image_url"]["url"]
         except (IndexError, TypeError, KeyError): pass
         try: return data["choices"][0]["message"]["images"][0]["url"]
         except (IndexError, TypeError, KeyError): pass
+        
+        # 2. 尝试流式响应格式: delta.content (支持自定义模型)
+        try:
+            delta_content = data["choices"][0]["delta"]["content"]
+            if delta_content:
+                # 匹配 Markdown 格式: ![alt](url)
+                markdown_match = re.search(r'!\[.*?\]\((https?://[^\s)]+)\)', delta_content)
+                if markdown_match:
+                    return markdown_match.group(1)
+        except (IndexError, TypeError, KeyError):
+            pass
+        
+        # 3. 尝试非流式格式: message.content
         try:
             content_text = data["choices"][0]["message"]["content"]
             url_match = re.search(r'https?://[^\s<>")\]]+', content_text)
@@ -488,6 +502,7 @@ class FigurineProPlugin(Star):
                     return content_text[start_idx:end_idx].strip()
         except (IndexError, TypeError, KeyError):
             pass
+        
         return None
 
     async def _call_api(self, image_bytes_list: List[bytes], prompt: str) -> bytes | str:
@@ -504,11 +519,19 @@ class FigurineProPlugin(Star):
         payload = {"model": model_name, "max_tokens": 1500, "stream": False, "messages": [{"role": "user", "content": content}]}
         try:
             if not self.iwf: return "ImageWorkflow 未初始化"
-            async with self.iwf.session.post(api_url, json=payload, headers=headers, proxy=self.iwf.proxy, timeout=120) as resp:
+            async with self.iwf.session.post(api_url, json=payload, headers=headers, proxy=self.iwf.proxy, timeout=300) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
                     logger.error(f"API 请求失败: HTTP {resp.status}, 响应: {error_text}")
-                    return f"API请求失败 (HTTP {resp.status}): {error_text[:200]}"
+                    # 对于常见的HTTP错误,只返回状态码
+                    if resp.status in [502, 503, 504, 524]:
+                        return f"API请求失败: HTTP {resp.status} (服务器超时或不可用)"
+                    elif resp.status >= 500:
+                        return f"API请求失败: HTTP {resp.status} (服务器错误)"
+                    elif resp.status >= 400:
+                        return f"API请求失败: HTTP {resp.status} (请求错误)"
+                    else:
+                        return f"API请求失败: HTTP {resp.status}"
                 data = await resp.json()
                 if "error" in data: return data["error"].get("message", json.dumps(data["error"]))
                 gen_image_url = self._extract_image_url_from_response(data)
